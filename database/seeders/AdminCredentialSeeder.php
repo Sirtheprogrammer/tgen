@@ -13,7 +13,7 @@ class AdminCredentialSeeder extends Seeder
      */
     public function run(): void
     {
-        AdminSetting::set('admin_email', 'sbrk255@gmail.com');
-        AdminSetting::set('admin_password', Hash::make('01319943591Bk.'));
+        AdminSetting::set('admin_email', 'raymondkahela@gmail.com');
+        AdminSetting::set('admin_password', Hash::make('Kahela@1'));
     }
 }
