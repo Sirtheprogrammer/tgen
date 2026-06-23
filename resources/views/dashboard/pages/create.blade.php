@@ -4,7 +4,7 @@
 @section('page_title', 'Create New Page')
 
 @section('content')
-<form method="POST" action="/pages" enctype="multipart/form-data" class="space-y-8 max-w-4xl">
+<form method="POST" action="/pages" enctype="multipart/form-data" class="js-upload-progress-form space-y-8 max-w-4xl">
     @csrf
 
     <!-- Display Validation Errors -->
@@ -197,6 +197,16 @@
         @if ($errors->has('video'))
             <p class="text-red-600 text-xs mt-2">{{ $errors->first('video') }}</p>
         @endif
+
+        <div class="upload-progress hidden rounded-lg border border-indigo-100 bg-indigo-50 p-4 mt-4">
+            <div class="flex items-center justify-between mb-2">
+                <p class="text-sm font-medium text-indigo-900">Uploading...</p>
+                <p class="upload-progress-label text-sm font-semibold text-indigo-700">0%</p>
+            </div>
+            <div class="h-3 overflow-hidden rounded-full bg-white">
+                <div class="upload-progress-bar h-full w-0 rounded-full bg-indigo-600 transition-all"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Payment Settings Section -->
@@ -492,5 +502,67 @@
 
     // Initialize on page load
     toggleAccountSections();
+
+    // XHR upload with progress tracking for large video files
+    document.querySelectorAll('.js-upload-progress-form').forEach((form) => {
+        const progress = form.querySelector('.upload-progress');
+        const bar = form.querySelector('.upload-progress-bar');
+        const label = form.querySelector('.upload-progress-label');
+        const submitButton = form.querySelector('button[type="submit"]');
+
+        form.addEventListener('submit', (event) => {
+            if (!window.XMLHttpRequest || !progress || !bar || !label) {
+                return;
+            }
+
+            event.preventDefault();
+
+            const xhr = new XMLHttpRequest();
+            const formData = new FormData(form);
+
+            progress.classList.remove('hidden');
+            bar.style.width = '0%';
+            label.textContent = '0%';
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.classList.add('opacity-70', 'cursor-not-allowed');
+            }
+
+            xhr.upload.addEventListener('progress', (progressEvent) => {
+                if (!progressEvent.lengthComputable) {
+                    return;
+                }
+
+                const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+                bar.style.width = `${percent}%`;
+                label.textContent = `${percent}%`;
+            });
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status >= 200 && xhr.status < 400) {
+                    window.location.href = xhr.responseURL || form.action;
+                    return;
+                }
+
+                label.textContent = 'Upload failed';
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.classList.remove('opacity-70', 'cursor-not-allowed');
+                }
+            });
+
+            xhr.addEventListener('error', () => {
+                label.textContent = 'Upload failed';
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.classList.remove('opacity-70', 'cursor-not-allowed');
+                }
+            });
+
+            xhr.open(form.method, form.action);
+            xhr.send(formData);
+        });
+    });
 </script>
 @endsection
