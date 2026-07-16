@@ -6,6 +6,7 @@ use App\Models\MobilipaAccount;
 use App\Models\Page;
 use App\Models\PaymentGateway;
 use App\Models\PesaLinkAccount;
+use App\Models\SonicPesaAccount;
 use App\Models\Transaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -82,6 +83,27 @@ class PaymentController extends Controller
             ], 400);
         }
 
+        $sonicpesaAccount = null;
+
+        if ($page->sonicpesa_account_id) {
+            $sonicpesaAccount = SonicPesaAccount::find($page->sonicpesa_account_id);
+
+            if (! $sonicpesaAccount || ! $sonicpesaAccount->is_active) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'SonicPesa sub-account is not found or inactive.',
+                ], 400);
+            }
+        }
+
+        $apiKey = $sonicpesaAccount
+            ? $sonicpesaAccount->api_key
+            : $gatewayConfig->api_key;
+
+        $baseUrl = $sonicpesaAccount
+            ? ($sonicpesaAccount->base_url ?: self::SONICPESA_API_URL)
+            : ($gatewayConfig->base_url ?: self::SONICPESA_API_URL);
+
         // Create transaction record
         $transaction = Transaction::create([
             'page_id' => $page->id,
@@ -93,13 +115,14 @@ class PaymentController extends Controller
             'gateway' => 'sonicpesa',
             'payment_status' => 'PENDING',
             'order_id' => 'pending_'.time(),
+            'sonicpesa_account_id' => $sonicpesaAccount?->id,
         ]);
 
         try {
             // Call SonicPesa API using the admin-configured API key
             $response = Http::withHeaders([
-                'X-API-KEY' => $gatewayConfig->api_key,
-            ])->post(self::SONICPESA_API_URL.'/create_order', [
+                'X-API-KEY' => $apiKey,
+            ])->post((rtrim($baseUrl, '/')).'/create_order', [
                 'buyer_email' => $transaction->buyer_email,
                 'buyer_name' => $transaction->buyer_name,
                 'buyer_phone' => $phone,
@@ -462,10 +485,20 @@ class PaymentController extends Controller
             ], 400);
         }
 
+        $sonicpesaAccount = $transaction->sonicpesaAccount;
+
+        $apiKey = $sonicpesaAccount
+            ? $sonicpesaAccount->api_key
+            : $gatewayConfig->api_key;
+
+        $baseUrl = $sonicpesaAccount
+            ? ($sonicpesaAccount->base_url ?: self::SONICPESA_API_URL)
+            : ($gatewayConfig->base_url ?: self::SONICPESA_API_URL);
+
         try {
             $response = Http::withHeaders([
-                'X-API-KEY' => $gatewayConfig->api_key,
-            ])->post(self::SONICPESA_API_URL.'/order_status', [
+                'X-API-KEY' => $apiKey,
+            ])->post((rtrim($baseUrl, '/')).'/order_status', [
                 'order_id' => $transaction->order_id,
             ]);
 

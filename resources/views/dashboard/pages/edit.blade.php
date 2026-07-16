@@ -205,6 +205,17 @@
                         @endforeach
                     </select>
                 </div>
+
+                <!-- SonicPesa Account Selection (shown only when SonicPesa is selected) -->
+                <div id="sonicpesaAccountWrapper" class="mt-4 {{ $page->payment_gateway === 'sonicpesa' ? '' : 'hidden' }}">
+                    <label for="sonicpesa_account_id" class="block text-sm font-medium text-gray-900 mb-2">SonicPesa Sub-Account</label>
+                    <select name="sonicpesa_account_id" id="sonicpesa_account_id" class="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition">
+                        <option value="">Select a SonicPesa account...</option>
+                        @foreach(\App\Models\SonicPesaAccount::where('is_active', true)->get() as $account)
+                            <option value="{{ $account->id }}" {{ old('sonicpesa_account_id', $page->sonicpesa_account_id) == $account->id ? 'selected' : '' }}>{{ $account->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
             </div>
         </div>
     </div>
@@ -280,18 +291,20 @@
     const gatewaySelect = document.getElementById('payment_gateway');
     const pesalinkAccountWrapper = document.getElementById('pesalinkAccountWrapper');
     const mobilipaAccountWrapper = document.getElementById('mobilipaAccountWrapper');
+    const sonicpesaAccountWrapper = document.getElementById('sonicpesaAccountWrapper');
 
     if (gatewaySelect) {
         gatewaySelect.addEventListener('change', function () {
+            pesalinkAccountWrapper.classList.add('hidden');
+            mobilipaAccountWrapper.classList.add('hidden');
+            sonicpesaAccountWrapper.classList.add('hidden');
+
             if (this.value === 'pesalink') {
                 pesalinkAccountWrapper.classList.remove('hidden');
-                mobilipaAccountWrapper.classList.add('hidden');
             } else if (this.value === 'mobilipa') {
-                pesalinkAccountWrapper.classList.add('hidden');
                 mobilipaAccountWrapper.classList.remove('hidden');
-            } else {
-                pesalinkAccountWrapper.classList.add('hidden');
-                mobilipaAccountWrapper.classList.add('hidden');
+            } else if (this.value === 'sonicpesa') {
+                sonicpesaAccountWrapper.classList.remove('hidden');
             }
         });
     }

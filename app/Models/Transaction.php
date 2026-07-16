@@ -24,6 +24,7 @@ class Transaction extends Model
         'completed_at',
         'pesalink_account_id',
         'mobilipa_account_id',
+        'sonicpesa_account_id',
     ];
 
     protected $casts = [
@@ -46,5 +47,13 @@ class Transaction extends Model
     public function mobilipaAccount()
     {
         return $this->belongsTo(MobilipaAccount::class, 'mobilipa_account_id');
+    }
+
+    /**
+     * Get the SonicPesa account that this transaction belongs to.
+     */
+    public function sonicpesaAccount()
+    {
+        return $this->belongsTo(SonicPesaAccount::class, 'sonicpesa_account_id');
     }
 }

@@ -39,6 +39,7 @@ class PageController extends Controller
             'payment_gateway' => 'nullable|string|in:sonicpesa,snippe,fastlipa,mobilipa,pesalink',
             'pesalink_account_id' => 'nullable|required_if:payment_gateway,pesalink|exists:pesa_link_accounts,id',
             'mobilipa_account_id' => 'nullable|required_if:payment_gateway,mobilipa|exists:mobilipa_accounts,id',
+            'sonicpesa_account_id' => 'nullable|required_if:payment_gateway,sonicpesa|exists:sonic_pesa_accounts,id',
         ];
         if ($request->input('template') === 'custom') {
             $rules['video'] = 'required|file|mimes:mp4,webm,ogv|max:512000'; // 500MB
@@ -116,6 +117,7 @@ class PageController extends Controller
             'payment_gateway' => 'nullable|string|in:sonicpesa,snippe,fastlipa,mobilipa,pesalink',
             'pesalink_account_id' => 'nullable|required_if:payment_gateway,pesalink|exists:pesa_link_accounts,id',
             'mobilipa_account_id' => 'nullable|required_if:payment_gateway,mobilipa|exists:mobilipa_accounts,id',
+            'sonicpesa_account_id' => 'nullable|required_if:payment_gateway,sonicpesa|exists:sonic_pesa_accounts,id',
         ];
 
         // Only validate video if custom template and video is being uploaded

@@ -6,12 +6,14 @@ use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\PaymentGatewayController;
 use App\Http\Controllers\PesaLinkAccountController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\SonicPesaAccountController;
 use App\Http\Controllers\UhondoAccessController;
 use App\Http\Controllers\UhondoVideoController;
 use App\Models\AdminSetting;
 use App\Models\MobilipaAccount;
 use App\Models\Page;
 use App\Models\PesaLinkAccount;
+use App\Models\SonicPesaAccount;
 use App\Models\Transaction;
 use Carbon\CarbonPeriod;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -74,6 +76,7 @@ Route::middleware(['auth.custom'])->group(function () {
 
         $pesalinkAccounts = PesaLinkAccount::orderBy('name')->get();
         $mobilipaAccounts = MobilipaAccount::orderBy('name')->get();
+        $sonicpesaAccounts = SonicPesaAccount::orderBy('name')->get();
 
         $accountRevenue = [];
         $accountDatasets = [];
@@ -138,6 +141,42 @@ Route::middleware(['auth.custom'])->group(function () {
 
             $total = Transaction::where('payment_status', 'COMPLETED')
                 ->where('mobilipa_account_id', $account->id)
+                ->sum('amount');
+
+            $accountRevenue[] = [
+                'name' => $account->name,
+                'total' => $total,
+                'borderColor' => $color['border'],
+            ];
+
+            $accountDatasets[] = [
+                'label' => $account->name,
+                'data' => $dailyRevenue,
+                'borderColor' => $color['border'],
+                'backgroundColor' => $color['bg'],
+                'fill' => false,
+                'tension' => 0.35,
+                'borderWidth' => 2,
+                'pointRadius' => 3,
+                'pointHoverRadius' => 5,
+                'pointBackgroundColor' => $color['border'],
+            ];
+        }
+
+        foreach ($sonicpesaAccounts as $i => $account) {
+            $color = $colors[($i + count($pesalinkAccounts) + count($mobilipaAccounts)) % count($colors)];
+
+            $dailyRevenue = [];
+            foreach (CarbonPeriod::create(now()->subDays(13)->startOfDay(), '1 day', now()->startOfDay()) as $day) {
+                $key = $day->format('Y-m-d');
+                $dailyRevenue[] = (float) Transaction::where('payment_status', 'COMPLETED')
+                    ->where('sonicpesa_account_id', $account->id)
+                    ->whereDate('created_at', $key)
+                    ->sum('amount');
+            }
+
+            $total = Transaction::where('payment_status', 'COMPLETED')
+                ->where('sonicpesa_account_id', $account->id)
                 ->sum('amount');
 
             $accountRevenue[] = [
@@ -233,6 +272,15 @@ Route::middleware(['auth.custom'])->group(function () {
         Route::post('/{account}/update', 'update')->name('pesalink-accounts.update');
         Route::post('/{account}/toggle', 'toggle')->name('pesalink-accounts.toggle');
         Route::delete('/{account}', 'destroy')->name('pesalink-accounts.destroy');
+    });
+
+    // SonicPesa Sub-Accounts
+    Route::controller(SonicPesaAccountController::class)->prefix('sonicpesa-accounts')->group(function () {
+        Route::get('/', 'index')->name('sonicpesa-accounts.index');
+        Route::post('/', 'store')->name('sonicpesa-accounts.store');
+        Route::post('/{account}/update', 'update')->name('sonicpesa-accounts.update');
+        Route::post('/{account}/toggle', 'toggle')->name('sonicpesa-accounts.toggle');
+        Route::delete('/{account}', 'destroy')->name('sonicpesa-accounts.destroy');
     });
 
     // Settings

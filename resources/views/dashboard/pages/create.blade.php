@@ -350,6 +350,18 @@
                 </select>
                 <p class="text-xs text-gray-600 mt-1">Choose which Mobilipa API account to use for payments on this page</p>
             </div>
+
+            <!-- SonicPesa Account Selection (shown only when SonicPesa is selected) -->
+            <div id="sonicpesaAccountSection" class="mt-6 {{ old('payment_gateway') === 'sonicpesa' || (!old('payment_gateway') && !$errors->any()) ? '' : 'hidden' }}">
+                <label for="sonicpesa_account_id" class="block text-sm font-medium text-gray-900 mb-2">SonicPesa Sub-Account</label>
+                <select name="sonicpesa_account_id" id="sonicpesa_account_id" class="w-full px-4 py-3 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition">
+                    <option value="">Select a SonicPesa account...</option>
+                    @foreach(\App\Models\SonicPesaAccount::where('is_active', true)->get() as $account)
+                        <option value="{{ $account->id }}" {{ old('sonicpesa_account_id') == $account->id ? 'selected' : '' }}>{{ $account->name }}</option>
+                    @endforeach
+                </select>
+                <p class="text-xs text-gray-600 mt-1">Choose which SonicPesa API account to use for payments on this page</p>
+            </div>
         </div>
     <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
         <div class="flex items-center justify-between">
@@ -481,18 +493,20 @@
     const gatewayRadios = document.querySelectorAll('input[name="payment_gateway"]');
     const pesalinkAccountSection = document.getElementById('pesalinkAccountSection');
     const mobilipaAccountSection = document.getElementById('mobilipaAccountSection');
+    const sonicpesaAccountSection = document.getElementById('sonicpesaAccountSection');
 
     function toggleAccountSections() {
         const selectedGateway = document.querySelector('input[name="payment_gateway"]:checked');
+        pesalinkAccountSection.classList.add('hidden');
+        mobilipaAccountSection.classList.add('hidden');
+        sonicpesaAccountSection.classList.add('hidden');
+
         if (selectedGateway && selectedGateway.value === 'pesalink') {
             pesalinkAccountSection.classList.remove('hidden');
-            mobilipaAccountSection.classList.add('hidden');
         } else if (selectedGateway && selectedGateway.value === 'mobilipa') {
-            pesalinkAccountSection.classList.add('hidden');
             mobilipaAccountSection.classList.remove('hidden');
-        } else {
-            pesalinkAccountSection.classList.add('hidden');
-            mobilipaAccountSection.classList.add('hidden');
+        } else if (selectedGateway && selectedGateway.value === 'sonicpesa') {
+            sonicpesaAccountSection.classList.remove('hidden');
         }
     }
 

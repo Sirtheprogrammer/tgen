@@ -16,6 +16,7 @@ class Page extends Model
         'is_active',
         'pesalink_account_id',
         'mobilipa_account_id',
+        'sonicpesa_account_id',
     ];
 
     protected $casts = [
@@ -36,5 +37,10 @@ class Page extends Model
     public function mobilipaAccount()
     {
         return $this->belongsTo(MobilipaAccount::class, 'mobilipa_account_id');
+    }
+
+    public function sonicpesaAccount()
+    {
+        return $this->belongsTo(SonicPesaAccount::class, 'sonicpesa_account_id');
     }
 }
