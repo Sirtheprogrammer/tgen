@@ -4,7 +4,7 @@
 @section('page_title', 'Edit: ' . $page->title)
 
 @section('content')
-<form method="POST" action="{{ route('pages.update', $page) }}" enctype="multipart/form-data" class="js-upload-progress-form space-y-8 max-w-4xl">
+<form method="POST" action="{{ route('pages.update', ['page' => $page->getKey()]) }}" enctype="multipart/form-data" class="js-upload-progress-form space-y-8 max-w-4xl">
     @csrf
     @method('PUT')
 

@@ -171,7 +171,7 @@
                         <td class="px-6 py-4 text-sm font-medium text-gray-900">{{ $page->price ? 'TZS ' . number_format($page->price, 2) : 'Free' }}</td>
                         <td class="px-6 py-4 text-sm text-gray-600">{{ $page->created_at->format('M d, Y') }}</td>
                         <td class="px-6 py-4 text-sm text-center">
-                            <a href="{{ route('pages.edit', $page) }}" class="text-indigo-600 hover:text-indigo-900 font-medium">Edit</a>
+                            <a href="{{ route('pages.edit', ['page' => $page->getKey()]) }}" class="text-indigo-600 hover:text-indigo-900 font-medium">Edit</a>
                         </td>
                     </tr>
                     @empty

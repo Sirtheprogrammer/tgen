@@ -223,10 +223,10 @@ Route::middleware(['auth.custom'])->group(function () {
         Route::get('/', 'index')->name('pages.index');
         Route::get('/create', 'create')->name('pages.create');
         Route::post('/', 'store')->name('pages.store');
-        Route::get('/{page}/edit', 'edit')->name('pages.edit');
-        Route::put('/{page}', 'update')->name('pages.update');
-        Route::delete('/{page}', 'destroy')->name('pages.destroy');
-        Route::patch('/{page}/toggle', 'toggle')->name('pages.toggle');
+        Route::get('/{page:id}/edit', 'edit')->name('pages.edit');
+        Route::put('/{page:id}', 'update')->name('pages.update');
+        Route::delete('/{page:id}', 'destroy')->name('pages.destroy');
+        Route::patch('/{page:id}/toggle', 'toggle')->name('pages.toggle');
     });
 
     // Templates
