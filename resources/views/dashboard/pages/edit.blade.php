@@ -100,6 +100,9 @@
         </div>
     </div>
 
+    @include('dashboard.pages._cover-uploader', ['page' => $page])
+
+    @if(false)
     <!-- Cover Page Images Section -->
     <div class="bg-white rounded-xl shadow-sm p-6 border {{ $errors->has('cover_images') || $errors->has('cover_images.*') ? 'border-red-500' : 'border-gray-200' }}">
         <h2 class="text-lg font-bold text-gray-900 mb-2">Cover Page Images</h2>
@@ -149,6 +152,7 @@
         @endif
     </div>
 
+    @endif
     <!-- Video Upload Section (only for custom template) -->
     @if($page->template === 'custom')
     <div id="videoSection" class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
@@ -358,7 +362,7 @@
         });
     }
 
-    // Cover images selection
+    /* Legacy cover uploader disabled; the shared gallery uploader owns this interaction.
     const coverDropZone = document.getElementById('coverDropZone');
     const coverImagesInput = document.getElementById('coverImages');
     const coverPreview = document.getElementById('coverPreview');
@@ -382,6 +386,7 @@
         }
     });
 
+    */
     // XHR upload with progress tracking for large video files
     document.querySelectorAll('.js-upload-progress-form').forEach((form) => {
         const progress = form.querySelector('.upload-progress');

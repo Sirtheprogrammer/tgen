@@ -170,6 +170,9 @@
         @endif
     </div>
 
+    @include('dashboard.pages._cover-uploader')
+
+    @if(false)
     <!-- Cover Page Images Section -->
     <div class="bg-white rounded-xl shadow-sm p-6 border {{ $errors->has('cover_images') || $errors->has('cover_images.*') ? 'border-red-500' : 'border-gray-200' }}">
         <h2 class="text-lg font-bold text-gray-900 mb-2">Cover Page Images</h2>
@@ -201,6 +204,7 @@
         @endif
     </div>
 
+    @endif
     <!-- Video Upload Section (only for custom template) -->
     <div id="videoSection" class="hidden bg-white rounded-xl shadow-sm p-6 border {{ $errors->has('video') ? 'border-red-500' : 'border-gray-200' }}">
         <h2 class="text-lg font-bold text-gray-900 mb-6">Background Video</h2>
@@ -503,7 +507,7 @@
         }
     });
 
-    // Cover images selection
+    /* Legacy cover uploader disabled; the shared gallery uploader owns this interaction.
     const coverDropZone = document.getElementById('coverDropZone');
     const coverImagesInput = document.getElementById('coverImages');
     const coverPreview = document.getElementById('coverPreview');
@@ -527,6 +531,7 @@
         }
     });
 
+    */
     // Auto-generate slug
     const titleInput = document.getElementById('title');
     const slugInput = document.getElementById('slug');

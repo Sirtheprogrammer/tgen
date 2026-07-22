@@ -100,6 +100,24 @@ class PageCoverTest extends TestCase
         }
     }
 
+    public function test_cover_uploader_supports_multiple_image_selection_on_create_and_edit(): void
+    {
+        $this->authenticateAdmin();
+        $page = $this->createPage();
+
+        $this->get('/pages/create')
+            ->assertOk()
+            ->assertSee('name="cover_images[]"', false)
+            ->assertSee('multiple', false)
+            ->assertSee('Drop several images here');
+
+        $this->get('/pages/'.$page->id.'/edit')
+            ->assertOk()
+            ->assertSee('name="cover_images[]"', false)
+            ->assertSee('multiple', false)
+            ->assertSee('Ready to upload');
+    }
+
     public function test_cover_upload_is_rejected_when_more_than_four_images_are_sent(): void
     {
         Storage::fake('public');
