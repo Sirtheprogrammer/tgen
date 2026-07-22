@@ -56,7 +56,7 @@
 </section>
 
 <script>
-document.addEventListener('DOMContentLoaded', () => {
+function initializeCoverUploader() {
     const dropZone = document.getElementById('coverDropZone');
     const input = document.getElementById('coverImages');
     const preview = document.getElementById('coverPreview');
@@ -66,6 +66,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearButton = document.getElementById('clearCoverImages');
     const removalInputs = [...document.querySelectorAll('.existing-cover-removal')];
     let selectedFiles = [];
+
+    if (!dropZone || !input || dropZone.dataset.initialized === 'true') {
+        return;
+    }
+
+    dropZone.dataset.initialized = 'true';
 
     const activeExistingCount = () => removalInputs.filter((checkbox) => !checkbox.checked).length;
     const fileKey = (file) => `${file.name}-${file.size}-${file.lastModified}`;
@@ -149,5 +155,13 @@ document.addEventListener('DOMContentLoaded', () => {
         render();
     });
     render();
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeCoverUploader, { once: true });
+} else {
+    initializeCoverUploader();
+}
+
+document.addEventListener('livewire:navigated', initializeCoverUploader);
 </script>

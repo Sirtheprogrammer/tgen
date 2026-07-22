@@ -109,7 +109,8 @@ class PageCoverTest extends TestCase
             ->assertOk()
             ->assertSee('name="cover_images[]"', false)
             ->assertSee('multiple', false)
-            ->assertSee('Drop several images here');
+            ->assertSee('Drop several images here')
+            ->assertSee("document.addEventListener('livewire:navigated', initializeCoverUploader)", false);
 
         $this->get('/pages/'.$page->id.'/edit')
             ->assertOk()
