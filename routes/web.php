@@ -318,7 +318,8 @@ Route::get('/api/uhondo-access/config', [UhondoAccessController::class, 'config'
     ->name('api.uhondo-access.config');
 
 // Public Routes - Pages (must be last so dashboard routes take priority)
-Route::get('/{page}', [PageController::class, 'show'])->where('page', '[a-z0-9-]+')->name('page.show');
+Route::get('/{page}/watch', [PageController::class, 'show'])->where('page', '[a-z0-9-]+')->name('page.show');
+Route::get('/{page}', [PageController::class, 'cover'])->where('page', '[a-z0-9-]+')->name('page.cover');
 
 // Root redirect
 Route::get('/', function () {

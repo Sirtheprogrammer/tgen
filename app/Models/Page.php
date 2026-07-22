@@ -13,6 +13,7 @@ class Page extends Model
         'price',
         'payment_gateway',
         'video_path',
+        'cover_images',
         'is_active',
         'pesalink_account_id',
         'mobilipa_account_id',
@@ -22,6 +23,7 @@ class Page extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'price' => 'decimal:2',
+        'cover_images' => 'array',
     ];
 
     public function getRouteKeyName(): string

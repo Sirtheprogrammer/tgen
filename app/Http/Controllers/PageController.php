@@ -40,12 +40,17 @@ class PageController extends Controller
             'pesalink_account_id' => 'nullable|required_if:payment_gateway,pesalink|exists:pesa_link_accounts,id',
             'mobilipa_account_id' => 'nullable|required_if:payment_gateway,mobilipa|exists:mobilipa_accounts,id',
             'sonicpesa_account_id' => 'nullable|required_if:payment_gateway,sonicpesa|exists:sonic_pesa_accounts,id',
+            'cover_images' => 'nullable|array|max:4',
+            'cover_images.*' => 'image|mimes:jpeg,jpg,png,webp|max:5120',
         ];
         if ($request->input('template') === 'custom') {
             $rules['video'] = 'required|file|mimes:mp4,webm,ogv|max:512000'; // 500MB
         }
 
         $validated = $request->validate($rules);
+
+        // Cover images are handled below as stored file paths
+        unset($validated['cover_images']);
 
         // Generate unique slug
         $baseSlug = Str::slug($request->title);
@@ -66,6 +71,17 @@ class PageController extends Controller
             $validated['video_path'] = $videoPath;
         }
 
+        // Handle cover page image uploads (max 4)
+        if ($request->hasFile('cover_images')) {
+            $coverImages = [];
+
+            foreach ($request->file('cover_images') as $coverImage) {
+                $coverImages[] = $coverImage->store('covers', 'public');
+            }
+
+            $validated['cover_images'] = $coverImages;
+        }
+
         Page::create($validated);
 
         return redirect('/pages')->with('success', 'Page created successfully! Access it at: /'.$slug);
@@ -79,6 +95,13 @@ class PageController extends Controller
         // Delete uploaded video if exists
         if ($page->video_path && \Storage::disk('public')->exists($page->video_path)) {
             \Storage::disk('public')->delete($page->video_path);
+        }
+
+        // Delete uploaded cover images if any
+        foreach ($page->cover_images ?? [] as $coverImage) {
+            if (\Storage::disk('public')->exists($coverImage)) {
+                \Storage::disk('public')->delete($coverImage);
+            }
         }
 
         $page->delete();
@@ -118,6 +141,10 @@ class PageController extends Controller
             'pesalink_account_id' => 'nullable|required_if:payment_gateway,pesalink|exists:pesa_link_accounts,id',
             'mobilipa_account_id' => 'nullable|required_if:payment_gateway,mobilipa|exists:mobilipa_accounts,id',
             'sonicpesa_account_id' => 'nullable|required_if:payment_gateway,sonicpesa|exists:sonic_pesa_accounts,id',
+            'cover_images' => 'nullable|array|max:4',
+            'cover_images.*' => 'image|mimes:jpeg,jpg,png,webp|max:5120',
+            'remove_cover_images' => 'nullable|array',
+            'remove_cover_images.*' => 'string',
         ];
 
         // Only validate video if custom template and video is being uploaded
@@ -127,6 +154,9 @@ class PageController extends Controller
 
         $validated = $request->validate($rules);
         $validated['is_active'] = $request->has('is_active');
+
+        // Cover images are handled below as stored file paths
+        unset($validated['cover_images'], $validated['remove_cover_images']);
 
         // Handle video upload for custom template
         if ($page->template === 'custom' && $request->hasFile('video')) {
@@ -138,9 +168,60 @@ class PageController extends Controller
             $validated['video_path'] = $videoPath;
         }
 
+        // Handle cover page images: remove selected ones, append new uploads (max 4 total)
+        $coverImages = array_values($page->cover_images ?? []);
+
+        foreach ((array) $request->input('remove_cover_images', []) as $pathToRemove) {
+            $key = array_search($pathToRemove, $coverImages, true);
+
+            if ($key !== false) {
+                unset($coverImages[$key]);
+
+                if (\Storage::disk('public')->exists($pathToRemove)) {
+                    \Storage::disk('public')->delete($pathToRemove);
+                }
+            }
+        }
+
+        $coverImages = array_values($coverImages);
+
+        if ($request->hasFile('cover_images')) {
+            foreach ($request->file('cover_images') as $coverImage) {
+                if (count($coverImages) >= 4) {
+                    break;
+                }
+
+                $coverImages[] = $coverImage->store('covers', 'public');
+            }
+        }
+
+        $validated['cover_images'] = empty($coverImages) ? null : $coverImages;
+
         $page->update($validated);
 
         return redirect('/pages')->with('success', 'Page updated successfully!');
+    }
+
+    /**
+     * Display the cover page (public entry point for a generated page).
+     */
+    public function cover(Page $page)
+    {
+        if (! $page->is_active) {
+            abort(404);
+        }
+
+        $coverImages = array_values($page->cover_images ?? []);
+
+        // Pages without cover images go straight to the template flow
+        if (empty($coverImages)) {
+            return redirect()->route('page.show', ['page' => $page->slug]);
+        }
+
+        return view('templates.cover', [
+            'page' => $page,
+            'coverImages' => $coverImages,
+        ]);
     }
 
     /**
