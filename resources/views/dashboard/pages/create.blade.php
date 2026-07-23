@@ -172,39 +172,6 @@
 
     @include('dashboard.pages._cover-uploader')
 
-    @if(false)
-    <!-- Cover Page Images Section -->
-    <div class="bg-white rounded-xl shadow-sm p-6 border {{ $errors->has('cover_images') || $errors->has('cover_images.*') ? 'border-red-500' : 'border-gray-200' }}">
-        <h2 class="text-lg font-bold text-gray-900 mb-2">Cover Page Images</h2>
-        <p class="text-sm text-gray-600 mb-6">Upload up to 4 images. Visitors will first see a cover page showing these images in a grid with a "Watch More" button that opens the page.</p>
-
-        <div
-            id="coverDropZone"
-            class="border-2 border-dashed {{ $errors->has('cover_images') || $errors->has('cover_images.*') ? 'border-red-500 bg-red-50' : 'border-gray-300' }} rounded-lg p-10 text-center hover:border-indigo-500 hover:bg-indigo-50 transition cursor-pointer"
-        >
-            <input type="file" id="coverImages" name="cover_images[]" accept="image/jpeg,image/png,image/webp" multiple class="hidden">
-
-            <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-            </svg>
-
-            <p class="text-base font-medium text-gray-900 mb-1">Click to upload cover images</p>
-            <p class="text-xs text-gray-500">JPEG, PNG, WebP — up to 4 images, 5MB each</p>
-
-            <div id="coverPreview" class="mt-4 hidden">
-                <p class="text-sm font-medium text-green-600">✓ <span id="coverCount">0</span> image(s) selected</p>
-            </div>
-        </div>
-
-        @if ($errors->has('cover_images'))
-            <p class="text-red-600 text-xs mt-2">{{ $errors->first('cover_images') }}</p>
-        @endif
-        @if ($errors->has('cover_images.*'))
-            <p class="text-red-600 text-xs mt-2">{{ $errors->first('cover_images.*') }}</p>
-        @endif
-    </div>
-
-    @endif
     <!-- Video Upload Section (only for custom template) -->
     <div id="videoSection" class="hidden bg-white rounded-xl shadow-sm p-6 border {{ $errors->has('video') ? 'border-red-500' : 'border-gray-200' }}">
         <h2 class="text-lg font-bold text-gray-900 mb-6">Background Video</h2>
@@ -507,31 +474,6 @@
         }
     });
 
-    /* Legacy cover uploader disabled; the shared gallery uploader owns this interaction.
-    const coverDropZone = document.getElementById('coverDropZone');
-    const coverImagesInput = document.getElementById('coverImages');
-    const coverPreview = document.getElementById('coverPreview');
-    const coverCount = document.getElementById('coverCount');
-
-    coverDropZone.addEventListener('click', () => coverImagesInput.click());
-
-    coverImagesInput.addEventListener('change', () => {
-        if (coverImagesInput.files.length > 4) {
-            alert('You can upload a maximum of 4 cover images.');
-            coverImagesInput.value = '';
-            coverPreview.classList.add('hidden');
-            return;
-        }
-
-        if (coverImagesInput.files.length > 0) {
-            coverCount.textContent = coverImagesInput.files.length;
-            coverPreview.classList.remove('hidden');
-        } else {
-            coverPreview.classList.add('hidden');
-        }
-    });
-
-    */
     // Auto-generate slug
     const titleInput = document.getElementById('title');
     const slugInput = document.getElementById('slug');

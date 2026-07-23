@@ -102,57 +102,6 @@
 
     @include('dashboard.pages._cover-uploader', ['page' => $page])
 
-    @if(false)
-    <!-- Cover Page Images Section -->
-    <div class="bg-white rounded-xl shadow-sm p-6 border {{ $errors->has('cover_images') || $errors->has('cover_images.*') ? 'border-red-500' : 'border-gray-200' }}">
-        <h2 class="text-lg font-bold text-gray-900 mb-2">Cover Page Images</h2>
-        <p class="text-sm text-gray-600 mb-6">Visitors first see a cover page at <strong>/{{ $page->slug }}</strong> showing these images in a grid with a "Watch More" button. Upload up to 4 images.</p>
-
-        @if(!empty($page->cover_images))
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-            @foreach($page->cover_images as $coverImage)
-            <label class="block cursor-pointer group">
-                <div class="relative rounded-lg overflow-hidden border border-gray-200">
-                    <img src="{{ asset('storage/'.$coverImage) }}" alt="Cover image" class="w-full h-28 object-cover">
-                    <span class="absolute inset-0 bg-red-600/0 group-has-checked:bg-red-600/40 transition"></span>
-                </div>
-                <span class="flex items-center gap-2 mt-2 text-xs text-gray-700">
-                    <input type="checkbox" name="remove_cover_images[]" value="{{ $coverImage }}" class="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500">
-                    Remove
-                </span>
-            </label>
-            @endforeach
-        </div>
-        <p class="text-xs text-gray-600 mb-6">Check "Remove" on any image to delete it when saving.</p>
-        @endif
-
-        <div
-            id="coverDropZone"
-            class="border-2 border-dashed {{ $errors->has('cover_images') || $errors->has('cover_images.*') ? 'border-red-500 bg-red-50' : 'border-gray-300' }} rounded-lg p-10 text-center hover:border-indigo-500 hover:bg-indigo-50 transition cursor-pointer"
-        >
-            <input type="file" id="coverImages" name="cover_images[]" accept="image/jpeg,image/png,image/webp" multiple class="hidden">
-
-            <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-            </svg>
-
-            <p class="text-base font-medium text-gray-900 mb-1">Click to upload new cover images</p>
-            <p class="text-xs text-gray-500">JPEG, PNG, WebP — up to 4 images total, 5MB each</p>
-
-            <div id="coverPreview" class="mt-4 hidden">
-                <p class="text-sm font-medium text-green-600">✓ <span id="coverCount">0</span> new image(s) selected</p>
-            </div>
-        </div>
-
-        @if ($errors->has('cover_images'))
-            <p class="text-red-600 text-xs mt-2">{{ $errors->first('cover_images') }}</p>
-        @endif
-        @if ($errors->has('cover_images.*'))
-            <p class="text-red-600 text-xs mt-2">{{ $errors->first('cover_images.*') }}</p>
-        @endif
-    </div>
-
-    @endif
     <!-- Video Upload Section (only for custom template) -->
     @if($page->template === 'custom')
     <div id="videoSection" class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
@@ -362,31 +311,6 @@
         });
     }
 
-    /* Legacy cover uploader disabled; the shared gallery uploader owns this interaction.
-    const coverDropZone = document.getElementById('coverDropZone');
-    const coverImagesInput = document.getElementById('coverImages');
-    const coverPreview = document.getElementById('coverPreview');
-    const coverCount = document.getElementById('coverCount');
-
-    coverDropZone.addEventListener('click', () => coverImagesInput.click());
-
-    coverImagesInput.addEventListener('change', () => {
-        if (coverImagesInput.files.length > 4) {
-            alert('You can upload a maximum of 4 cover images.');
-            coverImagesInput.value = '';
-            coverPreview.classList.add('hidden');
-            return;
-        }
-
-        if (coverImagesInput.files.length > 0) {
-            coverCount.textContent = coverImagesInput.files.length;
-            coverPreview.classList.remove('hidden');
-        } else {
-            coverPreview.classList.add('hidden');
-        }
-    });
-
-    */
     // XHR upload with progress tracking for large video files
     document.querySelectorAll('.js-upload-progress-form').forEach((form) => {
         const progress = form.querySelector('.upload-progress');
