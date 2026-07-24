@@ -1211,6 +1211,23 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
 
     <script>
+        const previewVideoSources = [
+            'https://uhondo.online/storage/videos/oGi67lmcZ9KSvyJh8JLjkMeImtB1VnhMOUfulIw4.mp4',
+            'https://uhondo.online/storage/videos/aP3hsKc0YJKaUReqJwCcE6u1QVKOZYJGgAMGSC37.mp4',
+            'https://uhondo.online/storage/videos/YO0GwAnvLFeIkficxT6h3EXG883zdSCkAJgAxmHA.mp4',
+            'https://uhondo.online/storage/videos/Vikt3QHO0xfsPbyQ7EaUNKRiCJM2IAtDh9nA20ud.mp4',
+            'https://uhondo.online/storage/videos/tIWhkEcMuZoWIi2o2sCziQLpbjSPCywG0eSQDF2G.mp4',
+            'https://uhondo.online/storage/videos/WTIOdRQLPiRF5oYIxHSIw4RxbK98Td1W9nQwck7D.mp4',
+            'https://uhondo.online/storage/videos/7ipTnlyxYSUS81pO50IXecdtC59Z6dQDrVlioSFn.mp4',
+            'https://uhondo.online/storage/videos/PhsBhNwuecljpD3vwpHZHNoRgxvNVxFH4VqalX6C.mp4',
+            'https://uhondo.online/storage/videos/Kbvw5iAoGgAlGfB2bXE0YkxeZnNBVITzmlwm2Qf2.mp4',
+            'https://uhondo.online/storage/videos/r2yYXzIFTPaEBMNGaZ4aya7w1lstrUMESUiLErX6.mp4',
+            'https://uhondo.online/storage/videos/Q9Js6yOq4aB8VIiTTZpHTHhO69BgJ4U9Prmd98W3.mp4',
+            'https://uhondo.online/storage/videos/j9vmSvcGOepOyYRbOHPy5mYJlS0BlplT4KtFf5cZ.mp4',
+            'https://uhondo.online/storage/videos/k1bwAjWb3WRHPHZtQHiA0mNanwqjusAJN3t02BUa.mov',
+            'https://uhondo.online/storage/videos/xoZg0vhBXo6tfgwzLkGHt4QM8xAfquLt9E3HPwGc.mp4',
+        ];
+
         // Video data with all your thumbnails
         const videos = [
             {
@@ -1480,12 +1497,14 @@
 
                 const thumbnailId = `thumbnail-${index}`;
                 const duration = getRandomDuration();
+                const previewSource = previewVideoSources[index % previewVideoSources.length];
 
                 videoCard.innerHTML = `
                     <div class="video-thumbnail">
                         <div class="loading-placeholder" id="loading-${index}"></div>
                         <div class="thumbnail-loading" id="loading-text-${index}">Loading...</div>
-                        <img id="${thumbnailId}" src="" alt="${video.title}" style="display: none;">
+                        <video id="preview-${index}" class="video-preview" src="${previewSource}" poster="${video.thumbnail}" muted loop playsinline preload="metadata"></video>
+                        <img id="${thumbnailId}" src="${video.thumbnail}" alt="${video.title}" style="display: none;">
                         <div class="video-duration">${duration}</div>
                     </div>
                     <div class="video-info">
@@ -1503,10 +1522,24 @@
 
                 videoGrid.appendChild(videoCard);
 
+                const previewVideo = document.getElementById(`preview-${index}`);
                 const img = document.getElementById(thumbnailId);
                 const loadingPlaceholder = document.getElementById(`loading-${index}`);
                 const loadingText = document.getElementById(`loading-text-${index}`);
 
+                if (previewVideo) {
+                    previewVideo.addEventListener('loadeddata', () => {
+                        loadingPlaceholder.style.display = 'none';
+                        loadingText.style.display = 'none';
+                    });
+                    previewVideo.addEventListener('error', () => {
+                        loadingPlaceholder.style.display = 'none';
+                        loadingText.style.display = 'none';
+                        img.style.display = 'block';
+                    });
+                    previewVideo.muted = true;
+                    previewVideo.play().catch(() => {});
+                }
 
                 setTimeout(() => {
                     loadImageOptimized(img, video.thumbnail, loadingPlaceholder, loadingText);
